@@ -24,8 +24,10 @@ SECRET_KEY = 'django-insecure-_v+8af6$#c%u=8up2=66j(6e086b!8y#rqiabkf)awo&*r(-5o
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
-
 ALLOWED_HOSTS = []
+if not DEBUG:
+    ALLOWED_HOSTS = ['environmenthealth.onrender.com',
+                     'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -126,13 +128,14 @@ REST_FRAMEWORK = {
 
 
 CORS_ALLOWED_ORIGINS = [
-    # 'http://localhost:8000',
-    # 'http://127.0.0.1:8000',
-    # 'https://bookingaktc.onrender.com',
-    # 'http://127.0.0.1:8000'
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://127.0.0.1:3000',
+    'http://localhost:3000',
+    'https://environmenthealth.onrender.com',
 ]
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOW_CREDENTIALS = True
+# CORS_ALLOW_ALL_ORIGINS = True
 
 
 # Password validation
