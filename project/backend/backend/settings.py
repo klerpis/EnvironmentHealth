@@ -23,9 +23,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-_v+8af6$#c%u=8up2=66j(6e086b!8y#rqiabkf)awo&*r(-5o'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-ALLOWED_HOSTS = []
-if not DEBUG:
+# DEBUG = True
+DEBUG = False
+if DEBUG:
+    ALLOWED_HOSTS = []
+else:
     ALLOWED_HOSTS = ['environmenthealth.onrender.com',
                      'localhost', '127.0.0.1']
 
