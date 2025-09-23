@@ -1,0 +1,214 @@
+# api/views.py
+from django.utils import timezone
+from django.db import models
+
+
+def cached_request(cache_key, url, timeout=300):
+    try:
+        # Try cache
+        data = cache.get(cache_key)
+        if data:
+            return data
+
+        # Fetch API
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+
+        # Save cache
+        cache.set(cache_key, data, timeout=timeout)
+        return data
+    except Exception:
+        # fallback to cache if available
+        return cache.get(cache_key, {"error": "API unavailable and no cache"})
+
+
+@api_view(['GET'])
+def weather_forecast(request):
+    lat = request.GET.get("lat", "6.5244")
+    lon = request.GET.get("lon", "3.3792")
+    city = request.GET.get("city", "Lagos")
+
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m"
+    cache_key = f"weather_{lat}_{lon}"
+
+    raw = cached_request(cache_key, url, timeout=600)
+
+    # Shape data
+    if "hourly" in raw:
+        shaped = {
+            "city": city,
+            "latitude": lat,
+            "longitude": lon,
+            "temperature": raw["hourly"]["temperature_2m"][:24],  # next 24h
+            "humidity": raw["hourly"]["relative_humidity_2m"][:24],
+            "wind_speed": raw["hourly"]["wind_speed_10m"][:24],
+            "timestamps": raw["hourly"]["time"][:24]
+        }
+
+        # Save snapshot
+        WeatherRecord.objects.create(
+            city=city,
+            latitude=lat,
+            longitude=lon,
+            temperature=shaped["temperature"][0],
+            humidity=shaped["humidity"][0],
+            wind_speed=shaped["wind_speed"][0],
+        )
+    else:
+        shaped = {"error": "No data"}
+
+    return Response(shaped)
+
+
+@api_view(['GET'])
+def air_quality(request):
+    city = request.GET.get("city", "Lagos")
+    url = f"https://api.openaq.org/v2/latest?city={city}"
+    cache_key = f"air_quality_{city.lower()}"
+
+    raw = cached_request(cache_key, url, timeout=900)
+
+    # Shape data
+    shaped = {"city": city, "measurements": {}}
+    if "results" in raw and raw["results"]:
+        measurements = raw["results"][0].get("measurements", [])
+        for m in measurements:
+            shaped["measurements"][m["parameter"]] = m["value"]
+
+        # Save snapshot
+        AirQualityRecord.objects.create(
+            city=city,
+            pm25=shaped["measurements"].get("pm25"),
+            pm10=shaped["measurements"].get("pm10"),
+            o3=shaped["measurements"].get("o3"),
+            no2=shaped["measurements"].get("no2"),
+            so2=shaped["measurements"].get("so2"),
+            co=shaped["measurements"].get("co"),
+        )
+    else:
+        shaped["error"] = "No data"
+
+    return Response(shaped)
+
+
+@api_view(['GET'])
+def weather_history(request):
+    city = request.GET.get("city", "Lagos")
+    limit = int(request.GET.get("limit", 24))  # default last 24 entries
+
+    records = WeatherRecord.objects.filter(
+        city__iexact=city).order_by("-timestamp")[:limit]
+    serializer = WeatherRecordSerializer(records, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def air_quality_history(request):
+    city = request.GET.get("city", "Lagos")
+    limit = int(request.GET.get("limit", 24))  # default last 24 entries
+
+    records = AirQualityRecord.objects.filter(
+        city__iexact=city).order_by("-timestamp")[:limit]
+    serializer = AirQualityRecordSerializer(records, many=True)
+    return Response(serializer.data)
+
+
+class PollutantReadingViewSet(viewsets.ModelViewSet):
+    queryset = PollutantReading.objects.all().order_by('-timestamp')
+    serializer_class = PollutantReadingSerializer
+
+    # latest readings for dashboard
+    @action(detail=False, methods=['get'])
+    def latest(self, request):
+        latest_readings = (
+            PollutantReading.objects
+            .order_by('name', '-timestamp')
+            .distinct('name')  # latest per pollutant
+        )
+        serializer = self.get_serializer(latest_readings, many=True)
+        return Response(serializer.data)
+
+    # history by pollutant name
+    @action(detail=False, methods=['get'])
+    def history(self, request):
+        name = request.query_params.get('name')
+        days = int(request.query_params.get('days', 7))
+        since = timezone.now() - timedelta(days=days)
+
+        qs = PollutantReading.objects.filter(
+            name=name,
+            timestamp__gte=since
+        ).order_by('timestamp')
+
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    # daily average (optional)
+    @action(detail=False, methods=['get'])
+    def daily_avg(self, request):
+        name = request.query_params.get('name')
+        days = int(request.query_params.get('days', 7))
+        since = timezone.now() - timedelta(days=days)
+
+        qs = (
+            PollutantReading.objects
+            .filter(name=name, timestamp__gte=since)
+            .extra({'day': "date(timestamp)"})
+            .values('day')
+            .annotate(avg_value=Avg('value'))
+            .order_by('day')
+        )
+        return Response(qs)
+
+    @action(detail=False, methods=['get'])
+    def multi_history(self, request):
+        names = request.query_params.getlist(
+            'names')  # e.g. ?names=PM2.5&names=NO2
+        days = int(request.query_params.get('days', 7))
+        since = timezone.now() - timedelta(days=days)
+
+        qs = (
+            PollutantReading.objects
+            .filter(name__in=names, timestamp__gte=since)
+            .order_by('timestamp')
+        )
+
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+
+# api/models.py
+
+
+class WeatherRecord(models.Model):
+    city = models.CharField(max_length=100)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    temperature = models.FloatField()
+    humidity = models.FloatField()
+    wind_speed = models.FloatField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+
+class AirQualityRecord(models.Model):
+    city = models.CharField(max_length=100)
+    aqi = models.IntegerField(null=True, blank=True)
+    pm25 = models.FloatField(null=True, blank=True)
+    pm10 = models.FloatField(null=True, blank=True)
+    o3 = models.FloatField(null=True, blank=True)
+    no2 = models.FloatField(null=True, blank=True)
+    so2 = models.FloatField(null=True, blank=True)
+    co = models.FloatField(null=True, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+
+class PollutantReading(models.Model):
+    name = models.CharField(max_length=50)  # e.g. PM2.5
+    value = models.FloatField()
+    unit = models.CharField(max_length=20)  # µg/m³, ppm, ppb
+    status = models.CharField(max_length=20, default="Good")
+    timestamp = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        return f"{self.name} - {self.value} {self.unit}"
