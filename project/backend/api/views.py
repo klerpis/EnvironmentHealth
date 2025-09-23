@@ -132,8 +132,28 @@ def air_quality(request):
     url = f"https://api.openaq.org/v3/locations?city={city}&limit=1"
     loc_raw = cached_request(cache_key, url, timeout=900)
     if not loc_raw or not loc_raw.get("results"):
-        ''
-        return
+        data_instance = AirQualityRecord.objects.first()
+        try:
+            from django.forms.models import model_to_dict
+            aq_dict = model_to_dict(data_instance)
+
+        except:
+            aq_dict = {}
+            return Response({"error": "No air quality data"}, status=500)
+
+        # pollutants[param] = 2 not needed here
+        aq_dict['city']
+        shaped_list.append({
+            "name": param,
+            "value": 2,
+            "unit": unit,
+            "timestamp": ts,
+            "location": m.get("locationId"),
+        })
+        {
+            "city": city,
+            "pollutants": shaped_list,
+        }
         # handle missing
     location = loc_raw["results"][0]
     location_id = location["id"]
@@ -142,7 +162,7 @@ def air_quality(request):
 
     raw = cached_request(cache_key, latest_url, timeout=900)
     print(2000, 'am i in the right')
-    pprint(raw)
+    # pprint(raw)
 
     if not raw or "results" not in raw or not raw["results"]:
         return Response({"error": "No air quality data"}, status=500)
@@ -205,6 +225,7 @@ def air_quality(request):
         "city": city,
         "pollutants": shaped_list,
     })
+
 # @api_view(['GET'])
 # def air_quality(request):
 #     city = request.GET.get("city", "Lagos")
