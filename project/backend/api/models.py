@@ -12,6 +12,9 @@ class WeatherRecord(models.Model):
     wind_speed = models.FloatField()
     timestamp = models.DateTimeField(auto_now_add=True)
 
+    # def __str__(self):
+    #     return f'city'
+
 
 class AirQualityRecord(models.Model):
     city = models.CharField(max_length=100)
